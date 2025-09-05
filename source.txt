@@ -1,0 +1,7 @@
+category,source_name,url
+Email Platform Updates,Gmail Blog,https://blog.google/products/gmail/
+Email Platform Updates,Oracle Marketing Cloud Blog,https://blogs.oracle.com/marketingcloud/
+Email Platform Updates,Stripo Email Blog,https://stripo.email/blog/
+Martech & CRM News,SalesforceBen – News,https://www.salesforceben.com/category/news/
+Martech & CRM News,WordStream Blog,https://www.wordstream.com/blog
+Deliverability & Reputation,SpamResource RSS Feed,https://www.spamresource.com/feeds/posts/default?alt=rss
