@@ -1,0 +1,191 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 2rem; }
+      header { display:flex; justify-content: space-between; align-items:center; }
+      .card { max-width: 900px; margin: 1rem auto; padding: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+      label { display:block; margin-top: .5rem; }
+      input { padding: .4rem; }
+      button { padding: .5rem 1rem; margin-top: .5rem; }
+      .muted { color: #666; font-size: .9rem;}
+      .row { display:flex; gap: 2rem; }
+      .col { flex: 1; }
+      .flash { color: #0a0; margin-bottom: .5rem; }
+      .error { color: #b00; }
+      .dimmed { opacity: .55; filter: grayscale(0.4); }
+      .disabled { pointer-events: none; }
+      .inline { display: inline-flex; align-items: center; gap: .5rem; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h2>Dashboard</h2>
+      <nav>
+        <a href="/logout">Logout</a>
+      </nav>
+    </header>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h3>Plugins</h3>
+      <p class="muted">This dashboard supports multiple plugins. Enabled: SNDS.</p>
+    </div>
+
+    <div class="card">
+      <h3>SNDS</h3>
+      <form class="inline" method="post" action="/plugins/snds/enable">
+        <label class="inline">
+          <input type="checkbox" name="plugin_enabled" {% if snds_cfg.enabled %}checked{% endif %} />
+          Plugin Enabled
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <div class="row">
+        <div class="col {% if not snds_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Schedule</strong>
+          {% if not has_key %}
+            <div class="error">SNDS_KEY is not set. Ingest will fail until configured.</div>
+          {% endif %}
+          <form method="post" action="/plugins/snds/schedule">
+            <label>Interval minutes
+              <input type="number" min="1" name="interval_minutes" value="{{ snds_cfg.schedule.interval_minutes }}" />
+            </label>
+            <label>
+              <input type="checkbox" name="enabled" {% if snds_cfg.schedule.enabled %}checked{% endif %} />
+              Enabled
+            </label>
+            <div class="muted">Last run: {{ schedule_job.last_run_at or 'never' }}</div>
+            <button type="submit">Save Schedule</button>
+          </form>
+          <form method="post" action="/run-now">
+            <button type="submit">Run now</button>
+          </form>
+        </div>
+        <div class="col {% if not snds_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Alert Rules</strong>
+          <form method="post" action="/plugins/snds/alerts">
+            <label>
+              <input type="checkbox" name="alerts_enabled" {% if snds_cfg.alerts.enabled %}checked{% endif %} />
+              Enabled
+            </label>
+            <label>Complaint rate greater than (%)
+              <input type="number" step="0.01" min="0" name="complaint_rate_threshold" value="{{ snds_cfg.alerts.complaint_rate_threshold }}" />
+            </label>
+            <label>Trap hits at least
+              <input type="number" step="1" min="0" name="trap_hits_threshold" value="{{ snds_cfg.alerts.trap_hits_threshold }}" />
+            </label>
+            <label>Filter levels
+              <div>
+                <label><input type="checkbox" name="level_yellow" {% if 'YELLOW' in snds_cfg.alerts.filter_levels %}checked{% endif %}/> YELLOW</label>
+              </div>
+              <div>
+                <label><input type="checkbox" name="level_red" {% if 'RED' in snds_cfg.alerts.filter_levels %}checked{% endif %}/> RED</label>
+              </div>
+            </label>
+            <button type="submit">Save Alert Rules</button>
+          </form>
+        </div>
+        <div class="col {% if not snds_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Delivery Settings</strong>
+          <form method="post" action="/plugins/snds/delivery">
+            <label><input type="checkbox" name="method_email" {% if snds_cfg.delivery.email.enabled %}checked{% endif %}/> Email</label>
+            <label>Email recipients (comma-separated)
+              <input type="text" name="email_recipients" value="{{ snds_cfg.delivery.email.recipients }}" placeholder="ops@example.com, me@example.com" />
+            </label>
+            <label><input type="checkbox" name="method_slack" {% if snds_cfg.delivery.slack.enabled %}checked{% endif %}/> Slack</label>
+            <label>Slack webhook URL
+              <input type="text" name="slack_webhook_url" value="{{ snds_cfg.delivery.slack.webhook_url }}" placeholder="https://hooks.slack.com/services/..." />
+            </label>
+            <label><input type="checkbox" name="method_teams" {% if snds_cfg.delivery.teams.enabled %}checked{% endif %}/> Microsoft Teams</label>
+            <label>Teams webhook URL
+              <input type="text" name="teams_webhook_url" value="{{ snds_cfg.delivery.teams.webhook_url }}" placeholder="https://outlook.office.com/webhook/..." />
+            </label>
+            <label>Message template
+              <textarea name="message_template" rows="3" style="width:100%">{{ snds_cfg.delivery.message_template }}</textarea>
+              <div class="muted">Fields: {ip}, {activity_start}, {activity_end}, {complaint_rate}, {trap_hits}, {filter_result}</div>
+            </label>
+            <button type="submit">Save Delivery</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>News</h3>
+      <form class="inline" method="post" action="/plugins/news/enable">
+        <label class="inline">
+          <input type="checkbox" name="plugin_enabled" {% if news_cfg.enabled %}checked{% endif %} />
+          Plugin Enabled
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <div class="row">
+        <div class="col {% if not news_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Schedule</strong>
+          <form method="post" action="/plugins/news/schedule">
+            <label>Interval minutes
+              <input type="number" min="1" name="interval_minutes" value="{{ news_cfg.schedule.interval_minutes }}" />
+            </label>
+            <label>
+              <input type="checkbox" name="enabled" {% if news_cfg.schedule.enabled %}checked{% endif %} />
+              Enabled
+            </label>
+            <div class="muted">Note: News plugin is a placeholder. No job runs yet.</div>
+            <button type="submit">Save Schedule</button>
+          </form>
+        </div>
+        <div class="col {% if not news_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Alert Rules</strong>
+          <form method="post" action="/plugins/news/alerts">
+            <label>
+              <input type="checkbox" name="alerts_enabled" {% if news_cfg.alerts.enabled %}checked{% endif %} />
+              Enabled
+            </label>
+            <label>Keywords (comma-separated)
+              <input type="text" name="keywords" value="{{ news_cfg.alerts.keywords }}" placeholder="security, vulnerability, outage" />
+            </label>
+            <label>Sources (comma-separated)
+              <input type="text" name="sources" value="{{ news_cfg.alerts.sources }}" placeholder="cnn.com, bbc.com" />
+            </label>
+            <button type="submit">Save Alert Rules</button>
+          </form>
+        </div>
+        <div class="col {% if not news_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Delivery Settings</strong>
+          <form method="post" action="/plugins/news/delivery">
+            <label><input type="checkbox" name="method_email" {% if news_cfg.delivery.email.enabled %}checked{% endif %}/> Email</label>
+            <label>Email recipients (comma-separated)
+              <input type="text" name="email_recipients" value="{{ news_cfg.delivery.email.recipients }}" placeholder="ops@example.com, me@example.com" />
+            </label>
+            <label><input type="checkbox" name="method_slack" {% if news_cfg.delivery.slack.enabled %}checked{% endif %}/> Slack</label>
+            <label>Slack webhook URL
+              <input type="text" name="slack_webhook_url" value="{{ news_cfg.delivery.slack.webhook_url }}" placeholder="https://hooks.slack.com/services/..." />
+            </label>
+            <label><input type="checkbox" name="method_teams" {% if news_cfg.delivery.teams.enabled %}checked{% endif %}/> Microsoft Teams</label>
+            <label>Teams webhook URL
+              <input type="text" name="teams_webhook_url" value="{{ news_cfg.delivery.teams.webhook_url }}" placeholder="https://outlook.office.com/webhook/..." />
+            </label>
+            <label>Message template
+              <textarea name="message_template" rows="3" style="width:100%">{{ news_cfg.delivery.message_template }}</textarea>
+              <div class="muted">Fields (future): {title}, {url}</div>
+            </label>
+            <button type="submit">Save Delivery</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    
+
+  </body>
+  </html>
