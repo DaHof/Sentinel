@@ -2,6 +2,39 @@ category,source_name,url
 Email Platform Updates,Gmail Blog,https://blog.google/products/gmail/
 Email Platform Updates,Oracle Marketing Cloud Blog,https://blogs.oracle.com/marketingcloud/
 Email Platform Updates,Stripo Email Blog,https://stripo.email/blog/
+Email Platform Updates,Salesforce Marketing Cloud Release Notes,https://help.salesforce.com/s/articleView?id=release-notes.salesforce_release_notes.htm&type=5
+Email Platform Updates,Adobe Campaign Classic Release Notes,https://experienceleague.adobe.com/docs/campaign-classic.html?lang=en
+Email Platform Updates,Mailchimp Blog,https://mailchimp.com/resources/
 Martech & CRM News,SalesforceBen – News,https://www.salesforceben.com/category/news/
+Martech & CRM News,MarTech.org,https://martech.org/news/
 Martech & CRM News,WordStream Blog,https://www.wordstream.com/blog
 Deliverability & Reputation,SpamResource RSS Feed,https://www.spamresource.com/feeds/posts/default?alt=rss
+Deliverability & Reputation,Validity Blog,https://blog.validity.com/
+Deliverability & Reputation,Return Path/Validity Resources,https://www.validity.com/resource-center/
+Deliverability & Reputation,MxToolbox Blog,https://blog.mxtoolbox.com/
+Deliverability & Reputation,Postmark Blog,https://postmarkapp.com/blog
+Deliverability & Reputation,Mailop Blog (John Levine),https://mailop.org/listinfo/mailop
+Consent & Compliance,IAPP – Privacy Tracker,https://iapp.org/news/privacy-tracker/
+Consent & Compliance,European Data Protection Board News,https://edpb.europa.eu/news
+Consent & Compliance,Canadian CRTC CASL Updates,https://crtc.gc.ca/eng/archive.htm
+Consent & Compliance,FTC CAN-SPAM News,https://www.ftc.gov/news-events
+Cool Email Features,Litmus Blog,https://www.litmus.com/blog
+Cool Email Features,Email on Acid Blog,https://www.emailonacid.com/resources/
+Cool Email Features,CaniEmail,https://www.caniemail.com/
+SFMC Development,Salesforce Developers Blog,https://developer.salesforce.com/blogs
+SFMC Development,Salesforce Architects Blog,https://architect.salesforce.com/blog
+Data Cloud,Salesforce Data Cloud Docs,https://help.salesforce.com/s/articleView?id=sf.c360_release_notes.htm&type=5
+Marketing Cloud NXT,Salesforce Release Hub,https://www.salesforce.com/releases/
+Personalization,Salesforce Personalization Docs,https://help.salesforce.com/s/articleView?id=sf.mc_pz_release_notes.htm&type=5
+Intelligence,Datorama Blog (SFMC Intelligence),https://www.salesforce.com/products/marketing-cloud/intelligence/blog/
+Mobile/SMS,CTIA Newsroom,https://www.ctia.org/news
+Mobile/SMS,Mobile Marketing Association (MMA),https://www.mmaglobal.com/news
+Adobe CC,Adobe Experience League,https://experienceleague.adobe.com/docs/
+Direct Mail,USPS Newsroom,https://about.usps.com/newsroom/
+Direct Mail,Canada Post ,https://www.canadapost-postescanada.ca/blogs/business/category/marketing/
+Call Center,Genesys Blog,https://www.genesys.com/blog
+Call Center,Five9 Blog,https://www.five9.com/blog
+Figma/Design,Figma Blog,https://www.figma.com/blog/
+ESP (Other),Campaign Monitor Blog,https://www.campaignmonitor.com/resources/
+ESP (Other),Klaviyo Blog,https://www.klaviyo.com/blog
+ESP (Other),HubSpot Marketing Blog,https://blog.hubspot.com/marketing
