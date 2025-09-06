@@ -29,9 +29,12 @@ def create_app():
         # For local dev convenience only
         admin_hash = generate_password_hash("admin")
 
-    # Background scheduler
-    scheduler = BackgroundScheduler(timezone=os.getenv("TZ", "UTC"))
-    scheduler.start()
+    # Background scheduler (disabled by default; worker handles scheduling)
+    SCHEDULER_MODE = os.getenv("APP_SCHEDULER_MODE", "worker").lower()
+    scheduler = None
+    if SCHEDULER_MODE == "web":
+        scheduler = BackgroundScheduler(timezone=os.getenv("TZ", "UTC"))
+        scheduler.start()
     # Plugin configuration persisted in plugins.db
     DEFAULT_SNDS_CONFIG = {
         "enabled": True,
@@ -245,6 +248,8 @@ def create_app():
     def reschedule_job():
         job_id = schedule_state.get("job_id") or "snds_ingest_job"
         # Remove existing
+        if not scheduler:
+            return
         if scheduler.get_job(job_id):
             scheduler.remove_job(job_id)
         cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
@@ -259,7 +264,8 @@ def create_app():
             )
             schedule_state["job_id"] = job_id
     # Ensure scheduler reflects persisted settings on startup
-    reschedule_job()
+    if scheduler:
+        reschedule_job()
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
