@@ -8,3 +8,4 @@ snds.db
 __pycache__/
 snds_db.py
 app.py
+.DS_Store
