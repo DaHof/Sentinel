@@ -185,7 +185,172 @@
       </div>
     </div>
 
+    <div class="card">
+      <h3>SenderScore</h3>
+      <form class="inline" method="post" action="/plugins/senderscore/enable">
+        <label class="inline">
+          <input type="checkbox" name="plugin_enabled" {% if ss_cfg.enabled %}checked{% endif %} />
+          Plugin Enabled
+        </label>
+        <button type="submit">Save</button>
+      </form>
+      <div class="row">
+        <div class="col {% if not ss_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Schedule</strong>
+          <form method="post" action="/plugins/senderscore/schedule">
+            <label>Interval minutes
+              <input type="number" min="1" name="interval_minutes" value="{{ ss_cfg.schedule.interval_minutes }}" />
+            </label>
+            <label>
+              <input type="checkbox" name="enabled" {% if ss_cfg.schedule.enabled %}checked{% endif %} />
+              Enabled
+            </label>
+            <button type="submit">Save Schedule</button>
+          </form>
+          <form method="post" action="/plugins/senderscore/run-now">
+            <button type="submit">Run now</button>
+          </form>
+        </div>
+        <div class="col {% if not ss_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Alert Rules & Options</strong>
+          <form method="post" action="/plugins/senderscore/alerts">
+            <label>
+              <input type="checkbox" name="alerts_enabled" {% if ss_cfg.alerts.enabled %}checked{% endif %} />
+              Enabled
+            </label>
+            <label>Alert when score changes more than (%)
+              <input type="number" step="0.1" min="0" name="change_threshold_percent" value="{{ ss_cfg.alerts.change_threshold_percent }}" />
+            </label>
+            <label>
+              <input type="checkbox" name="notify_on_measure_change" {% if ss_cfg.alerts.notify_on_measure_change %}checked{% endif %} />
+              Alert when reputation measures change
+            </label>
+            <label>
+              <input type="checkbox" name="reputation_low_to_other" {% if ss_cfg.alerts.reputation_low_to_other %}checked{% endif %} />
+              Alert if any reputation shifts from Low to higher
+            </label>
+            <label>Spam Traps threshold (>=)
+              <input type="number" step="1" min="0" name="spam_trap_threshold" value="{{ ss_cfg.alerts.spam_trap_threshold }}" />
+            </label>
+            <label>Volume avg window (days)
+              <input type="number" step="1" min="1" name="volume_avg_days" value="{{ ss_cfg.alerts.volume_avg_days }}" />
+            </label>
+            <label>Alert when volume delta vs avg exceeds (%)
+              <input type="number" step="0.1" min="0" name="volume_change_threshold_percent" value="{{ ss_cfg.alerts.volume_change_threshold_percent }}" />
+            </label>
+            <label>IP Source</label>
+            <label class="inline"><input type="radio" name="ip_source" value="snds" {% if ss_cfg.options.ip_source == 'snds' %}checked{% endif %}/> From SNDS</label>
+            <label class="inline"><input type="radio" name="ip_source" value="manual" {% if ss_cfg.options.ip_source == 'manual' %}checked{% endif %}/> Manual list</label>
+            <label>Manual IPs (comma/newline-separated)
+              <textarea name="manual_ips" rows="4" style="width:100%">{{ ss_cfg.options.manual_ips }}</textarea>
+            </label>
+            <button type="submit">Save Alerts & Options</button>
+          </form>
+        </div>
+        <div class="col {% if not ss_cfg.enabled %}dimmed disabled{% endif %}">
+          <strong>Delivery Settings</strong>
+          <form method="post" action="/plugins/senderscore/delivery">
+            <label><input type="checkbox" name="method_email" {% if ss_cfg.delivery.email.enabled %}checked{% endif %}/> Email</label>
+            <label>Email recipients (comma-separated)
+              <input type="text" name="email_recipients" value="{{ ss_cfg.delivery.email.recipients }}" placeholder="ops@example.com, me@example.com" />
+            </label>
+            <label><input type="checkbox" name="method_slack" {% if ss_cfg.delivery.slack.enabled %}checked{% endif %}/> Slack</label>
+            <label>Slack webhook URL
+              <input type="text" name="slack_webhook_url" value="{{ ss_cfg.delivery.slack.webhook_url }}" placeholder="https://hooks.slack.com/services/..." />
+            </label>
+            <label><input type="checkbox" name="method_teams" {% if ss_cfg.delivery.teams.enabled %}checked{% endif %}/> Microsoft Teams</label>
+            <label>Teams webhook URL
+              <input type="text" name="teams_webhook_url" value="{{ ss_cfg.delivery.teams.webhook_url }}" placeholder="https://outlook.office.com/webhook/..." />
+            </label>
+            <label>Message template
+              <textarea name="message_template" rows="3" style="width:100%">{{ ss_cfg.delivery.message_template }}</textarea>
+              <div class="muted">Fields: {ip}, {old_score}, {new_score}, {delta_percent}, {volume}</div>
+            </label>
+            <button type="submit">Save Delivery</button>
+          </form>
+        </div>
+      </div>
+    </div>
     
+    <div class="card">
+      <h3>Recent Alerts: SNDS</h3>
+      {% if snds_alerts %}
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Time (UTC)</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Message</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Delivered via</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in snds_alerts %}
+              <tr>
+                <td style="vertical-align:top; padding:4px; white-space:nowrap;">{{ a.created_at }}</td>
+                <td style="vertical-align:top; padding:4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">{{ a.message }}</td>
+                <td style="vertical-align:top; padding:4px;">{{ a.deliveries or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No SNDS alerts yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Recent Alerts: SenderScore</h3>
+      {% if ss_alerts %}
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Time (UTC)</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Message</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Delivered via</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for a in ss_alerts %}
+              <tr>
+                <td style="vertical-align:top; padding:4px; white-space:nowrap;">{{ a.created_at }}</td>
+                <td style="vertical-align:top; padding:4px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">{{ a.message }}</td>
+                <td style="vertical-align:top; padding:4px;">{{ a.deliveries or '—' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No SenderScore alerts yet.</p>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>SenderScore Latest</h3>
+      {% if ss_latest %}
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Time (UTC)</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">IP</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Score</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Volume</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in ss_latest %}
+              <tr>
+                <td style="vertical-align:top; padding:4px; white-space:nowrap;">{{ row[0] }}</td>
+                <td style="vertical-align:top; padding:4px;">{{ row[1] }}</td>
+                <td style="vertical-align:top; padding:4px;">{{ row[2] }}</td>
+                <td style="vertical-align:top; padding:4px;">{{ row[3] }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No SenderScore results captured yet.</p>
+      {% endif %}
+    </div>
 
   </body>
   </html>

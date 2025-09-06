@@ -14,6 +14,7 @@ import requests
 
 import snds_db
 import plugin_store
+from worker import run_senderscore
 
 
 def create_app():
@@ -83,6 +84,34 @@ def create_app():
         },
     }
     _ = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
+
+    # SenderScore plugin config
+    DEFAULT_SS_CONFIG = {
+        "enabled": False,
+        "schedule": {"enabled": False, "interval_minutes": 1440},
+        "options": {
+            "ip_source": "snds",  # "snds" or "manual"
+            "manual_ips": "",     # comma or newline separated
+        },
+        "alerts": {
+            "enabled": True,
+            "change_threshold_percent": 5.0,
+            "notify_on_measure_change": True,
+            "reputation_low_to_other": True,
+            "spam_trap_threshold": 0,
+            "volume_avg_days": 7,
+            "volume_change_threshold_percent": 20.0,
+        },
+        "delivery": {
+            "email": {"enabled": False, "recipients": ""},
+            "slack": {"enabled": False, "webhook_url": ""},
+            "teams": {"enabled": False, "webhook_url": ""},
+            "message_template": (
+                "SenderScore alert {ip}: score {old_score} -> {new_score} (Δ{delta_percent}%), volume={volume}"
+            ),
+        },
+    }
+    _ = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
 
     def is_logged_in():
         return session.get("user") == admin_user
@@ -177,6 +206,27 @@ def create_app():
             _send_slack_alert(delivery.get("slack", {}).get("webhook_url", ""), full_message)
         if delivery.get("teams", {}).get("enabled"):
             _send_teams_alert(delivery.get("teams", {}).get("webhook_url", ""), full_message)
+
+        # Persist individual alert lines for dashboard visibility
+        methods_used = []
+        if delivery.get("email", {}).get("enabled"):
+            methods_used.append("email")
+        if delivery.get("slack", {}).get("enabled"):
+            methods_used.append("slack")
+        if delivery.get("teams", {}).get("enabled"):
+            methods_used.append("teams")
+        methods_str = ",".join(methods_used)
+        for idx, item in enumerate(alerts):
+            line = message_lines[idx] if idx < len(message_lines) else str(item)
+            meta = {
+                "ip": item.get("ip"),
+                "complaint_rate": item.get("complaint_rate"),
+                "trap_hits": item.get("trap_hits"),
+                "filter_result": item.get("filter_result"),
+                "activity_start": item.get("activity_start"),
+                "activity_end": item.get("activity_end"),
+            }
+            plugin_store.add_alert("snds", line, methods_str, meta)
 
     def _send_email_alert(to_addresses: str, body: str):
         emails = [e.strip() for e in (to_addresses or "").split(",") if e.strip()]
@@ -288,12 +338,31 @@ def create_app():
     def dashboard():
         snds_cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
         news_cfg = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
+        ss_cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        recent_alerts = plugin_store.list_alerts(limit=20)
+        snds_alerts = plugin_store.list_alerts_by_plugin("snds", limit=10)
+        ss_alerts = plugin_store.list_alerts_by_plugin("senderscore", limit=10)
+        # Load recent SenderScore rows for quick verification
+        ss_latest = []
+        try:
+            cur = sqlite3.connect(snds_db.DB_PATH).cursor()
+            cur.execute(
+                "SELECT observed_at, ip, score, volume, measures FROM senderscore_daily ORDER BY observed_at DESC LIMIT 20"
+            )
+            ss_latest = cur.fetchall()
+        except Exception:
+            ss_latest = []
         return render_template(
             "dashboard.html",
             schedule_job=schedule_state,
             has_key=bool(os.getenv("SNDS_KEY")),
             snds_cfg=snds_cfg,
             news_cfg=news_cfg,
+            ss_cfg=ss_cfg,
+            recent_alerts=recent_alerts,
+            snds_alerts=snds_alerts,
+            ss_alerts=ss_alerts,
+            ss_latest=ss_latest,
         )
 
     @app.route("/plugins/snds/schedule", methods=["POST"])
@@ -322,6 +391,119 @@ def create_app():
         ingest_and_alert()
         schedule_state["last_run_at"] = datetime.utcnow().isoformat()
         flash("Ingest triggered", "success")
+        return redirect(url_for("dashboard"))
+
+    # SenderScore plugin routes
+    @app.route("/plugins/senderscore/enable", methods=["POST"])
+    @login_required
+    def update_ss_enabled():
+        cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        cfg["enabled"] = request.form.get("plugin_enabled") == "on"
+        plugin_store.save_plugin("senderscore", cfg)
+        flash("SenderScore plugin toggled", "success")
+        return redirect(url_for("dashboard"))
+
+    @app.route("/plugins/senderscore/schedule", methods=["POST"])
+    @login_required
+    def update_ss_schedule():
+        cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        try:
+            interval = int(request.form.get("interval_minutes", cfg["schedule"]["interval_minutes"]))
+        except Exception:
+            interval = cfg["schedule"]["interval_minutes"]
+        enabled = request.form.get("enabled") == "on"
+        cfg["schedule"]["interval_minutes"] = max(1, interval)
+        cfg["schedule"]["enabled"] = enabled
+        plugin_store.save_plugin("senderscore", cfg)
+        flash("SenderScore schedule saved", "success")
+        return redirect(url_for("dashboard"))
+
+    @app.route("/plugins/senderscore/alerts", methods=["POST"])
+    @login_required
+    def update_ss_alerts():
+        cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        cfg["alerts"]["enabled"] = request.form.get("alerts_enabled") == "on"
+        try:
+            cfg["alerts"]["change_threshold_percent"] = float(
+                request.form.get(
+                    "change_threshold_percent", cfg["alerts"]["change_threshold_percent"]
+                )
+            )
+        except Exception:
+            pass
+        cfg["alerts"]["notify_on_measure_change"] = (
+            request.form.get("notify_on_measure_change") == "on"
+        )
+        cfg["alerts"]["reputation_low_to_other"] = (
+            request.form.get("reputation_low_to_other") == "on"
+        )
+        try:
+            cfg["alerts"]["spam_trap_threshold"] = int(
+                request.form.get(
+                    "spam_trap_threshold", cfg["alerts"].get("spam_trap_threshold", 0)
+                )
+            )
+        except Exception:
+            pass
+        try:
+            cfg["alerts"]["volume_avg_days"] = int(
+                request.form.get(
+                    "volume_avg_days", cfg["alerts"].get("volume_avg_days", 7)
+                )
+            )
+        except Exception:
+            pass
+        try:
+            cfg["alerts"]["volume_change_threshold_percent"] = float(
+                request.form.get(
+                    "volume_change_threshold_percent",
+                    cfg["alerts"].get("volume_change_threshold_percent", 20.0),
+                )
+            )
+        except Exception:
+            pass
+        # Options
+        source = request.form.get("ip_source", cfg["options"]["ip_source"]) or "snds"
+        manual_ips = request.form.get("manual_ips", cfg["options"].get("manual_ips", ""))
+        cfg["options"]["ip_source"] = source
+        cfg["options"]["manual_ips"] = manual_ips
+        plugin_store.save_plugin("senderscore", cfg)
+        flash("SenderScore alert rules saved", "success")
+        return redirect(url_for("dashboard"))
+
+    @app.route("/plugins/senderscore/delivery", methods=["POST"])
+    @login_required
+    def update_ss_delivery():
+        cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        email_enabled = request.form.get("method_email") == "on"
+        slack_enabled = request.form.get("method_slack") == "on"
+        teams_enabled = request.form.get("method_teams") == "on"
+        cfg["delivery"]["email"]["enabled"] = email_enabled
+        cfg["delivery"]["email"]["recipients"] = request.form.get("email_recipients", "").strip()
+        cfg["delivery"]["slack"]["enabled"] = slack_enabled
+        cfg["delivery"]["slack"]["webhook_url"] = request.form.get("slack_webhook_url", "").strip()
+        cfg["delivery"]["teams"]["enabled"] = teams_enabled
+        cfg["delivery"]["teams"]["webhook_url"] = request.form.get("teams_webhook_url", "").strip()
+        cfg["delivery"]["message_template"] = request.form.get(
+            "message_template", cfg["delivery"]["message_template"]
+        ).strip()
+        plugin_store.save_plugin("senderscore", cfg)
+        flash("SenderScore delivery settings saved", "success")
+        return redirect(url_for("dashboard"))
+
+    @app.route("/plugins/senderscore/run-now", methods=["POST"])
+    @login_required
+    def run_ss_now():
+        cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        if not cfg.get("enabled"):
+            flash("SenderScore plugin is disabled", "error")
+            return redirect(url_for("dashboard"))
+        try:
+            run_senderscore()
+            flash("SenderScore run triggered", "success")
+        except Exception as e:
+            app.logger.exception("SenderScore run failed: %s", e)
+            flash("SenderScore run failed; check logs", "error")
         return redirect(url_for("dashboard"))
 
     @app.route("/plugins/snds/alerts", methods=["POST"])
