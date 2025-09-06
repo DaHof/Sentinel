@@ -547,10 +547,14 @@ def run_senderscore():
     lines = []
     for a in alerts:
         try:
-            lines.append(template.format(**a))
+            line = template.format(**a)
+            # If user's template doesn't include {reason}, append it
+            if "{reason" not in template and a.get("reason"):
+                line = f"{line}; reason: {a['reason']}"
+            lines.append(line)
         except Exception:
             lines.append(
-                f"SenderScore alert {a['ip']}: {a['old_score']} -> {a['new_score']} (Δ{a['delta_percent']}%), volume={a['volume']}"
+                f"SenderScore alert {a['ip']}: {a['old_score']} -> {a['new_score']} (Δ{a['delta_percent']}%), volume={a['volume']}; reason: {a.get('reason','')}"
             )
     body = "\n".join(lines)
     methods = []

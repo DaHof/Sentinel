@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import sqlite3
 from datetime import datetime
 
@@ -107,11 +108,20 @@ def create_app():
             "slack": {"enabled": False, "webhook_url": ""},
             "teams": {"enabled": False, "webhook_url": ""},
             "message_template": (
-                "SenderScore alert {ip}: score {old_score} -> {new_score} (Δ{delta_percent}%), volume={volume}"
+                "SenderScore alert {ip}: score {old_score} -> {new_score} (Δ{delta_percent}%), volume={volume}; reason: {reason}"
             ),
         },
     }
     _ = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+
+    # UI preferences: user-defined IP labels (name + color)
+    DEFAULT_UI_CONFIG = {
+        "ip_labels": [
+            # {"ips": ["1.2.3.4", "1.2.3.5"], "name": "Brand A", "color": "#ff9900"}
+            # Back-compat also supports {"ip": "1.2.3.4", ...}
+        ]
+    }
+    _ = plugin_store.load_plugin("ui", DEFAULT_UI_CONFIG)
 
     def is_logged_in():
         return session.get("user") == admin_user
@@ -339,6 +349,7 @@ def create_app():
         snds_cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
         news_cfg = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
         ss_cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        ui_cfg = plugin_store.load_plugin("ui", DEFAULT_UI_CONFIG)
         recent_alerts = plugin_store.list_alerts(limit=20)
         snds_alerts = plugin_store.list_alerts_by_plugin("snds", limit=10)
         ss_alerts = plugin_store.list_alerts_by_plugin("senderscore", limit=10)
@@ -352,6 +363,26 @@ def create_app():
             ss_latest = cur.fetchall()
         except Exception:
             ss_latest = []
+        # Build quick lookup map for IP labels
+        ip_label_map = {}
+        try:
+            for item in (ui_cfg.get("ip_labels") or []):
+                name = (item.get("name") or "").strip()
+                color = (item.get("color") or "").strip()
+                if not name or not color:
+                    continue
+                # New format: list of IPs
+                if isinstance(item.get("ips"), list):
+                    for ip in item.get("ips"):
+                        sip = (ip or "").strip()
+                        if sip:
+                            ip_label_map[sip] = {"name": name, "color": color}
+                else:
+                    ip = (item.get("ip") or "").strip()
+                    if ip:
+                        ip_label_map[ip] = {"name": name, "color": color}
+        except Exception:
+            ip_label_map = {}
         return render_template(
             "dashboard.html",
             schedule_job=schedule_state,
@@ -359,10 +390,36 @@ def create_app():
             snds_cfg=snds_cfg,
             news_cfg=news_cfg,
             ss_cfg=ss_cfg,
+            ui_cfg=ui_cfg,
+            ip_label_map=ip_label_map,
             recent_alerts=recent_alerts,
             snds_alerts=snds_alerts,
             ss_alerts=ss_alerts,
             ss_latest=ss_latest,
+        )
+
+    @app.route("/settings")
+    @login_required
+    def settings():
+        ui_cfg = plugin_store.load_plugin("ui", DEFAULT_UI_CONFIG)
+        return render_template(
+            "settings.html",
+            ui_cfg=ui_cfg,
+        )
+
+    @app.route("/plugins", methods=["GET"])
+    @login_required
+    def plugins_page():
+        snds_cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
+        news_cfg = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
+        ss_cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        return render_template(
+            "plugins.html",
+            has_key=bool(os.getenv("SNDS_KEY")),
+            schedule_job=schedule_state,
+            snds_cfg=snds_cfg,
+            news_cfg=news_cfg,
+            ss_cfg=ss_cfg,
         )
 
     @app.route("/plugins/snds/schedule", methods=["POST"])
@@ -554,6 +611,48 @@ def create_app():
         cfg["delivery"]["message_template"] = message_template
         plugin_store.save_plugin("snds", cfg)
         flash("SNDS delivery settings saved", "success")
+        return redirect(url_for("dashboard"))
+
+    @app.route("/ui/ip-labels", methods=["POST"])
+    @login_required
+    def update_ip_labels():
+        cfg = plugin_store.load_plugin("ui", DEFAULT_UI_CONFIG)
+        labels: list[dict] = []
+        # Prefer structured inputs (arrays) with multi-IP support
+        ips_blocks = request.form.getlist("ips[]") or request.form.getlist("ip[]")
+        names = request.form.getlist("name[]")
+        colors = request.form.getlist("color[]")
+        if ips_blocks or names or colors:
+            for ips_block, name, color in zip(ips_blocks, names, colors):
+                name = (name or "").strip()
+                color = (color or "#888888").strip()
+                raw = (ips_block or "").strip()
+                # Split on comma or whitespace, support commas and newlines
+                parts = [p.strip() for p in re.split(r"[\s,]+", raw) if p.strip()]
+                if not parts or not name:
+                    continue
+                if color and not color.startswith("#"):
+                    color = f"#{color}"
+                labels.append({"ips": parts, "name": name, "color": color})
+        else:
+            # Back-compat: parse CSV textarea if provided
+            text = request.form.get("ip_labels_text", "")
+            for raw in text.splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) < 2:
+                    continue
+                ip = parts[0]
+                name = parts[1]
+                color = parts[2] if len(parts) >= 3 else "#888888"
+                if color and not color.startswith("#"):
+                    color = f"#{color}"
+                labels.append({"ip": ip, "name": name, "color": color})
+        cfg["ip_labels"] = labels
+        plugin_store.save_plugin("ui", cfg)
+        flash("IP labels saved", "success")
         return redirect(url_for("dashboard"))
 
     @app.route("/plugins/snds/enable", methods=["POST"])

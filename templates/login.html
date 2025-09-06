@@ -7,14 +7,21 @@
     <style>
       body { font-family: system-ui, sans-serif; padding: 2rem; }
       .card { max-width: 360px; margin: 5rem auto; padding: 1.5rem; border: 1px solid #ddd; border-radius: 8px; }
+      .card .brandbar { display:flex; align-items:center; gap:.6rem; background:#0f172a; color:#fff; padding:.4rem .6rem; border-radius:8px; margin:-.5rem -.5rem .75rem; }
+      .brandbar .logo { height: 28px; width:auto; display:block; }
       label { display:block; margin-top: .75rem; }
       input { width:100%; padding: .5rem; }
       button { margin-top: 1rem; padding: .6rem 1rem; }
       .flash { color: #b00020; margin-bottom: .5rem; }
+      .logo-large { height: 42px; width:auto; display:block; margin: 0 auto 1rem; }
     </style>
   </head>
   <body>
     <div class="card">
+      <div class="brandbar">
+        <img src="{{ url_for('static', filename='Sentinel.webp') }}" class="logo" alt="Logo"/>
+        <strong>Sentinel</strong>
+      </div>
       <h2>Sign in</h2>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
@@ -35,4 +42,3 @@
     </div>
   </body>
   </html>
-

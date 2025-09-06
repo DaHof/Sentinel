@@ -7,3 +7,4 @@ snds.db
 # Python cache
 __pycache__/
 snds_db.py
+app.py

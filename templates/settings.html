@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Settings</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 2rem; }
+      header { display:flex; justify-content: space-between; align-items:center; }
+      .app-header { background:#0f172a; color:#fff; padding:.6rem 1rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+      .app-header a { color:#fff; text-decoration:none; }
+      .app-header a:hover { text-decoration:underline; }
+      .brand { display:flex; align-items:center; gap:.6rem; }
+      .logo { height: 28px; width:auto; display:block; }
+      .card { max-width: 900px; margin: 1rem auto; padding: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+      label { display:block; margin-top: .5rem; }
+      input { padding: .4rem; }
+      button { padding: .5rem 1rem; margin-top: .5rem; }
+      .muted { color: #666; font-size: .9rem;}
+      .ip-chip { display: inline-block; padding: 2px 6px; border-radius: 999px; font-size: .8rem; color: #fff; margin-left: .4rem; vertical-align: middle; }
+      .flash { color: #0a0; margin-bottom: .5rem; }
+      .error { color: #b00; }
+    </style>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <img src="{{ url_for('static', filename='Sentinel.webp') }}" class="logo" alt="Logo"/>
+        <h2 style="margin:0">Settings</h2>
+      </div>
+      <nav>
+        <a href="/">Dashboard</a>
+        &nbsp;|&nbsp;
+        <a href="/plugins">Plugins</a>
+        &nbsp;|&nbsp;
+        <a href="/logout">Logout</a>
+      </nav>
+    </header>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card">
+      <h3>IP Labels</h3>
+      <p class="muted">Group multiple IPs under a single brand name and color. Enter multiple IPs separated by commas or newlines.</p>
+      <form method="post" action="/ui/ip-labels" id="ip-labels-form">
+        <table style="width:100%; border-collapse: collapse;">
+          <thead>
+            <tr>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">IPs</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Name</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Color</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Preview</th>
+              <th style="text-align:left; border-bottom:1px solid #ddd; padding:4px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="ip-labels-body">
+            {% set rows = ui_cfg.ip_labels if ui_cfg.ip_labels else [] %}
+            {% if rows %}
+              {% for it in rows %}
+                {% set ips_text = (', '.join(it.ips) if it.ips else (it.ip or '')) %}
+                <tr>
+                  <td style="padding:4px;">
+                    <textarea name="ips[]" rows="2" style="width:100%" placeholder="203.0.113.10, 203.0.113.11">{{ ips_text }}</textarea>
+                    <div class="muted">Comma or newline separated</div>
+                  </td>
+                  <td style="padding:4px;"><input type="text" name="name[]" value="{{ it.name }}" placeholder="Brand / MTA" /></td>
+                  <td style="padding:4px;"><input type="color" name="color[]" value="{{ it.color or '#888888' }}" /></td>
+                  <td style="padding:4px; white-space:nowrap;"><span class="ip-chip" style="background: {{ it.color or '#888888' }};">{{ it.name }}</span></td>
+                  <td style="padding:4px;"><button type="button" onclick="removeRow(this)">Remove</button></td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td style="padding:4px;">
+                  <textarea name="ips[]" rows="2" style="width:100%" placeholder="203.0.113.10, 203.0.113.11"></textarea>
+                  <div class="muted">Comma or newline separated</div>
+                </td>
+                <td style="padding:4px;"><input type="text" name="name[]" placeholder="Brand / MTA" /></td>
+                <td style="padding:4px;"><input type="color" name="color[]" value="#888888" /></td>
+                <td style="padding:4px;"></td>
+                <td style="padding:4px;"><button type="button" onclick="removeRow(this)">Remove</button></td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+        <div style="display:flex; gap: .5rem; margin-top:.5rem;">
+          <button type="button" onclick="addRow()">Add Row</button>
+          <button type="submit">Save IP Labels</button>
+        </div>
+      </form>
+      <script>
+        function addRow() {
+          const tbody = document.getElementById('ip-labels-body');
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td style="padding:4px;">
+              <textarea name="ips[]" rows="2" style="width:100%" placeholder="203.0.113.10, 203.0.113.11"></textarea>
+              <div class="muted">Comma or newline separated</div>
+            </td>
+            <td style="padding:4px;"><input type="text" name="name[]" placeholder="Brand / MTA" /></td>
+            <td style="padding:4px;"><input type="color" name="color[]" value="#888888" /></td>
+            <td style="padding:4px;"></td>
+            <td style="padding:4px;"><button type="button" onclick="removeRow(this)">Remove</button></td>
+          `;
+          tbody.appendChild(tr);
+        }
+        function removeRow(btn) {
+          const tr = btn.closest('tr');
+          if (tr) tr.remove();
+        }
+        // Live preview of chip on color/name edits
+        document.getElementById('ip-labels-body').addEventListener('input', function(e) {
+          const tr = e.target.closest('tr');
+          if (!tr) return;
+          const name = tr.querySelector('input[name="name[]"]').value || '';
+          const color = tr.querySelector('input[name="color[]"]').value || '#888888';
+          let cell = tr.children[3];
+          cell.innerHTML = name ? `<span class="ip-chip" style="background: ${color};">${name}</span>` : '';
+        });
+      </script>
+    </div>
+
+  </body>
+  </html>
