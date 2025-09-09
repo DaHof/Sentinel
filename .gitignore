@@ -9,3 +9,5 @@ __pycache__/
 snds_db.py
 app.py
 .DS_Store
+plugins.db
+snds.db-journal
