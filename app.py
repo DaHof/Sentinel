@@ -24,12 +24,21 @@ def create_app():
 
     # Simple in-memory user store for now; extend to DB later.
     admin_user = os.getenv("APP_ADMIN_USER", "admin")
+    admin_hash = os.getenv("APP_ADMIN_HASH")
     admin_pass = os.getenv("APP_ADMIN_PASS")
-    if admin_pass:
+    if admin_hash:
+        admin_hash = admin_hash.strip()
+        if not admin_hash:
+            admin_hash = None
+    if admin_hash is None and admin_pass:
         admin_hash = generate_password_hash(admin_pass)
-    else:
+    if admin_hash is None:
         # For local dev convenience only
         admin_hash = generate_password_hash("admin")
+        app.logger.warning(
+            "APP_ADMIN_PASS not set; using insecure default password. "
+            "Set APP_ADMIN_PASS or APP_ADMIN_HASH."
+        )
 
     # Background scheduler (disabled by default; worker handles scheduling)
     SCHEDULER_MODE = os.getenv("APP_SCHEDULER_MODE", "worker").lower()
