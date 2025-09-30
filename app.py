@@ -15,7 +15,7 @@ import requests
 
 import snds_db
 import plugin_store
-from worker import run_senderscore
+from worker import run_senderscore, sync_jobs
 
 
 def create_app():
@@ -24,12 +24,21 @@ def create_app():
 
     # Simple in-memory user store for now; extend to DB later.
     admin_user = os.getenv("APP_ADMIN_USER", "admin")
+    admin_hash = os.getenv("APP_ADMIN_HASH")
     admin_pass = os.getenv("APP_ADMIN_PASS")
-    if admin_pass:
+    if admin_hash:
+        admin_hash = admin_hash.strip()
+        if not admin_hash:
+            admin_hash = None
+    if admin_hash is None and admin_pass:
         admin_hash = generate_password_hash(admin_pass)
-    else:
+    if admin_hash is None:
         # For local dev convenience only
         admin_hash = generate_password_hash("admin")
+        app.logger.warning(
+            "APP_ADMIN_PASS not set; using insecure default password. "
+            "Set APP_ADMIN_PASS or APP_ADMIN_HASH."
+        )
 
     # Background scheduler (disabled by default; worker handles scheduling)
     SCHEDULER_MODE = os.getenv("APP_SCHEDULER_MODE", "worker").lower()
@@ -305,27 +314,22 @@ def create_app():
     # Ephemeral runtime state
     schedule_state = {"job_id": None, "last_run_at": None}
 
-    def reschedule_job():
-        job_id = schedule_state.get("job_id") or "snds_ingest_job"
-        # Remove existing
+    def refresh_jobs():
         if not scheduler:
             return
-        if scheduler.get_job(job_id):
-            scheduler.remove_job(job_id)
-        cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
-        if cfg.get("enabled") and cfg["schedule"].get("enabled"):
-            scheduler.add_job(
-                ingest_and_alert,
-                "interval",
-                minutes=max(1, int(cfg["schedule"].get("interval_minutes", 60))),
-                id=job_id,
-                replace_existing=True,
-                jitter=30,
-            )
-            schedule_state["job_id"] = job_id
-    # Ensure scheduler reflects persisted settings on startup
+        sync_jobs(scheduler)
+        schedule_state["job_id"] = "plugin:snds" if scheduler.get_job("plugin:snds") else None
+
     if scheduler:
-        reschedule_job()
+        refresh_jobs()
+        scheduler.add_job(
+            refresh_jobs,
+            "interval",
+            minutes=1,
+            id="system:sync",
+            replace_existing=True,
+            coalesce=True,
+        )
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
@@ -434,7 +438,7 @@ def create_app():
         cfg["schedule"]["interval_minutes"] = max(1, interval)
         cfg["schedule"]["enabled"] = enabled
         plugin_store.save_plugin("snds", cfg)
-        reschedule_job()
+        refresh_jobs()
         flash("SNDS schedule updated", "success")
         return redirect(url_for("dashboard"))
 
@@ -457,6 +461,7 @@ def create_app():
         cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
         cfg["enabled"] = request.form.get("plugin_enabled") == "on"
         plugin_store.save_plugin("senderscore", cfg)
+        refresh_jobs()
         flash("SenderScore plugin toggled", "success")
         return redirect(url_for("dashboard"))
 
@@ -472,6 +477,7 @@ def create_app():
         cfg["schedule"]["interval_minutes"] = max(1, interval)
         cfg["schedule"]["enabled"] = enabled
         plugin_store.save_plugin("senderscore", cfg)
+        refresh_jobs()
         flash("SenderScore schedule saved", "success")
         return redirect(url_for("dashboard"))
 
@@ -661,7 +667,7 @@ def create_app():
         cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
         cfg["enabled"] = request.form.get("plugin_enabled") == "on"
         plugin_store.save_plugin("snds", cfg)
-        reschedule_job()
+        refresh_jobs()
         flash("SNDS plugin toggled", "success")
         return redirect(url_for("dashboard"))
 
@@ -672,6 +678,7 @@ def create_app():
         cfg = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
         cfg["enabled"] = request.form.get("plugin_enabled") == "on"
         plugin_store.save_plugin("news", cfg)
+        refresh_jobs()
         flash("News plugin toggled", "success")
         return redirect(url_for("dashboard"))
 
@@ -687,6 +694,7 @@ def create_app():
         cfg["schedule"]["interval_minutes"] = max(1, interval)
         cfg["schedule"]["enabled"] = enabled
         plugin_store.save_plugin("news", cfg)
+        refresh_jobs()
         flash("News schedule saved (placeholder)", "success")
         return redirect(url_for("dashboard"))
 
