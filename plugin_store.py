@@ -56,6 +56,21 @@ def ensure_db():
                     """
                 )
             )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS plugin_events (
+                        id SERIAL PRIMARY KEY,
+                        plugin TEXT NOT NULL,
+                        event TEXT NOT NULL,
+                        status TEXT,
+                        message TEXT,
+                        created_at TEXT NOT NULL,
+                        meta TEXT
+                    )
+                    """
+                )
+            )
             conn.commit()
     else:
         with _get_conn() as conn:
@@ -76,6 +91,19 @@ def ensure_db():
                     created_at TEXT NOT NULL,
                     message TEXT NOT NULL,
                     deliveries TEXT,
+                    meta TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS plugin_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    plugin TEXT NOT NULL,
+                    event TEXT NOT NULL,
+                    status TEXT,
+                    message TEXT,
+                    created_at TEXT NOT NULL,
                     meta TEXT
                 )
                 """
@@ -228,6 +256,132 @@ def list_alerts(limit: int = 20) -> List[Dict[str, Any]]:
             }
         )
     return alerts
+
+
+def add_event(
+    plugin: str,
+    event: str,
+    status: str = "info",
+    message: str = "",
+    meta: Dict[str, Any] | None = None,
+) -> None:
+    """Record lifecycle events for plugins (enable/disable/run/results)."""
+    ensure_db()
+    created = datetime.utcnow().isoformat()
+    payload = json.dumps(meta or {})
+    if _ENGINE:
+        with _engine_conn() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO plugin_events (plugin, event, status, message, created_at, meta) "
+                    "VALUES (:plugin, :event, :status, :message, :created_at, :meta)"
+                ),
+                {
+                    "plugin": plugin,
+                    "event": event,
+                    "status": status,
+                    "message": message,
+                    "created_at": created,
+                    "meta": payload,
+                },
+            )
+            conn.commit()
+    else:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO plugin_events (plugin, event, status, message, created_at, meta) VALUES (?, ?, ?, ?, ?, ?)",
+                (plugin, event, status, message, created, payload),
+            )
+            conn.commit()
+
+
+def list_events(limit: int = 200) -> List[Dict[str, Any]]:
+    """Return recent plugin lifecycle events, newest first."""
+    ensure_db()
+    rows: List[tuple]
+    if _ENGINE:
+        with _engine_conn() as conn:
+            result = conn.execute(
+                text(
+                    "SELECT id, plugin, event, status, message, created_at, meta "
+                    "FROM plugin_events ORDER BY created_at DESC LIMIT :lim"
+                ),
+                {"lim": limit},
+            )
+            rows = result.fetchall()
+    else:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, plugin, event, status, message, created_at, meta FROM plugin_events ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            )
+            rows = cur.fetchall()
+
+    events: List[Dict[str, Any]] = []
+    for r in rows:
+        rid, plugin, event, status, message, created, meta = r
+        try:
+            meta_obj = json.loads(meta) if meta else {}
+        except Exception:
+            meta_obj = {}
+        events.append(
+            {
+                "id": rid,
+                "plugin": plugin,
+                "event": event,
+                "status": status or "",
+                "message": message or "",
+                "created_at": created,
+                "meta": meta_obj,
+            }
+        )
+    return events
+
+
+def list_events_by_plugin(plugin: str, limit: int = 100) -> List[Dict[str, Any]]:
+    """Return recent events for a single plugin."""
+    ensure_db()
+    rows: List[tuple]
+    if _ENGINE:
+        with _engine_conn() as conn:
+            result = conn.execute(
+                text(
+                    "SELECT id, plugin, event, status, message, created_at, meta "
+                    "FROM plugin_events WHERE plugin=:p ORDER BY created_at DESC LIMIT :lim"
+                ),
+                {"p": plugin, "lim": limit},
+            )
+            rows = result.fetchall()
+    else:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id, plugin, event, status, message, created_at, meta FROM plugin_events WHERE plugin=? ORDER BY created_at DESC LIMIT ?",
+                (plugin, limit),
+            )
+            rows = cur.fetchall()
+
+    events: List[Dict[str, Any]] = []
+    for r in rows:
+        rid, plug, event, status, message, created, meta = r
+        try:
+            meta_obj = json.loads(meta) if meta else {}
+        except Exception:
+            meta_obj = {}
+        events.append(
+            {
+                "id": rid,
+                "plugin": plug,
+                "event": event,
+                "status": status or "",
+                "message": message or "",
+                "created_at": created,
+                "meta": meta_obj,
+            }
+        )
+    return events
 
 
 def list_alerts_by_plugin(plugin: str, limit: int = 20) -> List[Dict[str, Any]]:

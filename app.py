@@ -15,7 +15,7 @@ import requests
 
 import snds_db
 import plugin_store
-from worker import run_senderscore, sync_jobs
+from worker import run_senderscore, sync_jobs, run_context
 
 
 def create_app():
@@ -148,15 +148,15 @@ def create_app():
 
     def evaluate_and_notify():
         """Evaluate SNDS alerts and send notifications as configured."""
+        alerts: list = []
         cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
         if not cfg.get("enabled"):
             app.logger.info("Plugin disabled; skipping evaluation")
-            return
+            return alerts, "plugin-disabled"
         if not cfg["alerts"].get("enabled"):
             app.logger.info("Alerts disabled; skipping evaluation")
-            return
-        # Fetch recent rows and evaluate per IP (latest entries preferred)
-        alerts = []
+            return alerts, "alerts-disabled"
+
         seen_ips = set()
         try:
             cur = sqlite3.connect(snds_db.DB_PATH).cursor()
@@ -172,7 +172,7 @@ def create_app():
             rows = cur.fetchall()
         except Exception as e:
             app.logger.exception("Failed to load data_feed for alerts: %s", e)
-            rows = []
+            return alerts, "error"
 
         for r in rows:
             ip, astart, aend, complaint_text, trap_hits, filter_result = r
@@ -203,7 +203,7 @@ def create_app():
 
         if not alerts:
             app.logger.info("No alerts triggered")
-            return
+            return alerts, "no-alerts"
 
         # Compose and send using methods configured
         delivery = cfg.get("delivery", {})
@@ -246,6 +246,8 @@ def create_app():
                 "activity_end": item.get("activity_end"),
             }
             plugin_store.add_alert("snds", line, methods_str, meta)
+
+        return alerts, "alerts-triggered"
 
     def _send_email_alert(to_addresses: str, body: str):
         emails = [e.strip() for e in (to_addresses or "").split(",") if e.strip()]
@@ -301,15 +303,92 @@ def create_app():
         except Exception as e:
             app.logger.exception("Teams alert error: %s", e)
 
-    def ingest_and_alert():
-        # Run the SNDS ingest using existing module
+    def ingest_and_alert(source: str = "manual") -> bool:
+        """Run SNDS ingest + evaluation and capture outcome for logging."""
+        plugin_store.add_event(
+            "snds",
+            "run",
+            status="started",
+            message=f"Run triggered ({source})",
+            meta={"source": source},
+        )
         try:
             snds_db.main()
         except Exception as e:
             app.logger.exception("Ingest failed: %s", e)
-            return
-        # Evaluate alert rules
-        evaluate_and_notify()
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="error",
+                message=f"Ingest failed: {e}",
+                meta={"source": source, "stage": "ingest"},
+            )
+            return False
+
+        try:
+            alerts, eval_status = evaluate_and_notify()
+        except Exception as e:  # guard unexpected issues
+            app.logger.exception("Evaluation crashed: %s", e)
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="error",
+                message=f"Evaluation crashed: {e}",
+                meta={"source": source, "stage": "evaluate"},
+            )
+            return False
+
+        alerts_count = len(alerts or [])
+        if eval_status == "plugin-disabled":
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="skipped",
+                message="Plugin disabled during evaluation",
+                meta={"source": source},
+            )
+        elif eval_status == "alerts-disabled":
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="skipped",
+                message="Alerts disabled",
+                meta={"source": source},
+            )
+        elif eval_status == "no-alerts":
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="success",
+                message="Run completed; no alerts triggered",
+                meta={"source": source, "alerts": alerts_count},
+            )
+        elif eval_status == "alerts-triggered":
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="success",
+                message=f"Run completed; {alerts_count} alerts triggered",
+                meta={"source": source, "alerts": alerts_count},
+            )
+        elif eval_status == "error":
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="error",
+                message="Evaluation failed",
+                meta={"source": source},
+            )
+            return False
+        else:
+            plugin_store.add_event(
+                "snds",
+                "run",
+                status="info",
+                message=f"Run finished with status {eval_status}",
+                meta={"source": source, "alerts": alerts_count},
+            )
+        return True
 
     # Ephemeral runtime state
     schedule_state = {"job_id": None, "last_run_at": None}
@@ -411,6 +490,12 @@ def create_app():
             ui_cfg=ui_cfg,
         )
 
+    @app.route("/logs")
+    @login_required
+    def logs_page():
+        events = plugin_store.list_events(limit=200)
+        return render_template("logs.html", events=events)
+
     @app.route("/plugins", methods=["GET"])
     @login_required
     def plugins_page():
@@ -449,9 +534,12 @@ def create_app():
         if not cfg.get("enabled"):
             flash("SNDS plugin is disabled", "error")
             return redirect(url_for("dashboard"))
-        ingest_and_alert()
-        schedule_state["last_run_at"] = datetime.utcnow().isoformat()
-        flash("Ingest triggered", "success")
+        ran = ingest_and_alert(source="manual")
+        if ran:
+            schedule_state["last_run_at"] = datetime.utcnow().isoformat()
+            flash("SNDS run finished", "success")
+        else:
+            flash("SNDS run failed; check logs", "error")
         return redirect(url_for("dashboard"))
 
     # SenderScore plugin routes
@@ -459,8 +547,17 @@ def create_app():
     @login_required
     def update_ss_enabled():
         cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        previous = bool(cfg.get("enabled"))
         cfg["enabled"] = request.form.get("plugin_enabled") == "on"
         plugin_store.save_plugin("senderscore", cfg)
+        state = "enabled" if cfg["enabled"] else "disabled"
+        plugin_store.add_event(
+            "senderscore",
+            "toggle",
+            status=state,
+            message=f"SenderScore plugin {state}",
+            meta={"enabled": cfg["enabled"], "previous": previous},
+        )
         refresh_jobs()
         flash("SenderScore plugin toggled", "success")
         return redirect(url_for("dashboard"))
@@ -562,10 +659,18 @@ def create_app():
             flash("SenderScore plugin is disabled", "error")
             return redirect(url_for("dashboard"))
         try:
-            run_senderscore()
-            flash("SenderScore run triggered", "success")
+            with run_context("manual"):
+                run_senderscore()
+            flash("SenderScore run finished", "success")
         except Exception as e:
             app.logger.exception("SenderScore run failed: %s", e)
+            plugin_store.add_event(
+                "senderscore",
+                "run",
+                status="error",
+                message=f"Manual run crashed: {e}",
+                meta={"source": "manual"},
+            )
             flash("SenderScore run failed; check logs", "error")
         return redirect(url_for("dashboard"))
 
@@ -665,8 +770,17 @@ def create_app():
     @login_required
     def update_snds_enabled():
         cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
+        previous = bool(cfg.get("enabled"))
         cfg["enabled"] = request.form.get("plugin_enabled") == "on"
         plugin_store.save_plugin("snds", cfg)
+        state = "enabled" if cfg["enabled"] else "disabled"
+        plugin_store.add_event(
+            "snds",
+            "toggle",
+            status=state,
+            message=f"SNDS plugin {state}",
+            meta={"enabled": cfg["enabled"], "previous": previous},
+        )
         refresh_jobs()
         flash("SNDS plugin toggled", "success")
         return redirect(url_for("dashboard"))
@@ -676,8 +790,17 @@ def create_app():
     @login_required
     def update_news_enabled():
         cfg = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
+        previous = bool(cfg.get("enabled"))
         cfg["enabled"] = request.form.get("plugin_enabled") == "on"
         plugin_store.save_plugin("news", cfg)
+        state = "enabled" if cfg["enabled"] else "disabled"
+        plugin_store.add_event(
+            "news",
+            "toggle",
+            status=state,
+            message=f"News plugin {state}",
+            meta={"enabled": cfg["enabled"], "previous": previous},
+        )
         refresh_jobs()
         flash("News plugin toggled", "success")
         return redirect(url_for("dashboard"))

@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Plugin Logs</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 2rem; background-color: #0f172a; }
+      header { display:flex; justify-content: space-between; align-items:center; }
+      .app-header { background:#0f172a; color:#fff; padding:.6rem 1rem; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+      .app-header a { color:#fff; text-decoration:none; }
+      .app-header a:hover { text-decoration:underline; }
+      .brand { display:flex; align-items:center; gap:.6rem; }
+      .logo { height: 28px; width:auto; display:block; }
+      .card { max-width: 1100px; margin: 1rem auto; padding: 1rem; border: 1px solid #ddd; border-radius: 8px; background-color: whitesmoke; }
+      table { width:100%; border-collapse: collapse; }
+      th, td { text-align:left; border-bottom:1px solid #ddd; padding:6px; }
+      th { background:#f1f5f9; }
+      .meta { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .85rem; color:#334155; }
+      .pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:.75rem; background:#e2e8f0; color:#0f172a; }
+    </style>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <img src="{{ url_for('static', filename='Sentinel.webp') }}" class="logo" alt="Logo"/>
+        <h2 style="margin:0">Plugin Activity</h2>
+      </div>
+      <nav>
+        <a href="/">Dashboard</a>
+        &nbsp;|&nbsp;
+        <a href="/plugins">Plugins</a>
+        &nbsp;|&nbsp;
+        <a href="/settings">Settings</a>
+        &nbsp;|&nbsp;
+        <a href="/logout">Logout</a>
+      </nav>
+    </header>
+    <div class="card">
+      <h3>Recent Plugin Events</h3>
+      {% if events %}
+        <table>
+          <thead>
+            <tr>
+              <th style="white-space:nowrap;">Time (UTC)</th>
+              <th>Plugin</th>
+              <th>Event</th>
+              <th>Status</th>
+              <th>Message</th>
+              <th>Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in events %}
+              <tr>
+                <td style="white-space:nowrap;">{{ ev.created_at }}</td>
+                <td style="white-space:nowrap;">{{ ev.plugin }}</td>
+                <td style="white-space:nowrap;">{{ ev.event }}</td>
+                <td style="white-space:nowrap;">
+                  {% if ev.status %}
+                    <span class="pill">{{ ev.status }}</span>
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+                <td>{{ ev.message or '—' }}</td>
+                <td class="meta">
+                  {% if ev.meta %}
+                    {{ ev.meta | tojson }}
+                  {% else %}
+                    —
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p style="color:#64748b;">No plugin activity recorded yet.</p>
+      {% endif %}
+    </div>
+  </body>
+</html>

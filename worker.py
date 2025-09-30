@@ -2,6 +2,8 @@ import os
 import json
 import time
 import sqlite3
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -20,6 +22,17 @@ import random
 
 
 TZ = os.getenv("TZ", "UTC")
+
+_RUN_CONTEXT = ContextVar("plugin_run_context", default="worker")
+
+
+@contextmanager
+def run_context(value: str):
+    token = _RUN_CONTEXT.set(value)
+    try:
+        yield
+    finally:
+        _RUN_CONTEXT.reset(token)
 
 
 def _send_email(to_addresses: str, body: str, subject: str = "SNDS Alerts"):
@@ -292,13 +305,28 @@ def _fetch_senderscore(ip: str, session: requests.Session) -> dict | None:
 
 @register("snds")
 def run_snds():
-    # Ingest
+    source = _RUN_CONTEXT.get()
+    plugin_store.add_event(
+        "snds",
+        "run",
+        status="started",
+        message=f"Run started ({source})",
+        meta={"source": source},
+    )
+
     try:
         snds_db.main()
     except Exception as e:
         print(f"[worker] SNDS ingest failed: {e}")
+        plugin_store.add_event(
+            "snds",
+            "run",
+            status="error",
+            message=f"Ingest failed: {e}",
+            meta={"source": source, "stage": "ingest"},
+        )
         return
-    # Evaluate
+
     cfg = plugin_store.load_plugin("snds", {
         "enabled": True,
         "schedule": {"enabled": False, "interval_minutes": 60},
@@ -310,9 +338,27 @@ def run_snds():
             "message_template": "SNDS alert for {ip}: complaints={complaint_rate}% traps={trap_hits} filter={filter_result} window {activity_start}→{activity_end}",
         },
     })
-    if not cfg.get("enabled") or not cfg["alerts"].get("enabled"):
-        print("[worker] SNDS alerts disabled; skipping evaluation")
+    if not cfg.get("enabled"):
+        print("[worker] SNDS disabled; skipping evaluation")
+        plugin_store.add_event(
+            "snds",
+            "run",
+            status="skipped",
+            message="Plugin disabled",
+            meta={"source": source},
+        )
         return
+    if not cfg["alerts"].get("enabled"):
+        print("[worker] SNDS alerts disabled; skipping evaluation")
+        plugin_store.add_event(
+            "snds",
+            "run",
+            status="skipped",
+            message="Alerts disabled",
+            meta={"source": source},
+        )
+        return
+
     alerts = []
     seen = set()
     try:
@@ -328,7 +374,15 @@ def run_snds():
         rows = cur.fetchall()
     except Exception as e:
         print(f"[worker] failed to load data_feed: {e}")
-        rows = []
+        plugin_store.add_event(
+            "snds",
+            "run",
+            status="error",
+            message=f"Failed to load data_feed: {e}",
+            meta={"source": source, "stage": "evaluate"},
+        )
+        return
+
     for r in rows:
         ip, astart, aend, complaint_text, trap_hits, filter_result = r
         if ip in seen:
@@ -344,24 +398,37 @@ def run_snds():
         cond_trap = hit_val >= int(cfg["alerts"].get("trap_hits_threshold", 1))
         cond_filter = filt in [x.upper() for x in cfg["alerts"].get("filter_levels", [])]
         if cond_comp or cond_trap or cond_filter:
-            alerts.append({
-                "ip": ip,
-                "activity_start": astart,
-                "activity_end": aend,
-                "complaint_rate": comp_val,
-                "trap_hits": hit_val,
-                "filter_result": filt,
-            })
+            alerts.append(
+                {
+                    "ip": ip,
+                    "activity_start": astart,
+                    "activity_end": aend,
+                    "complaint_rate": comp_val,
+                    "trap_hits": hit_val,
+                    "filter_result": filt,
+                }
+            )
+
     if not alerts:
         print("[worker] SNDS: no alerts triggered")
+        plugin_store.add_event(
+            "snds",
+            "run",
+            status="success",
+            message="Run completed; no alerts triggered",
+            meta={"source": source, "alerts": 0},
+        )
         return
+
     template = cfg["delivery"].get("message_template")
     lines = []
     for a in alerts:
         try:
             lines.append(template.format(**a))
         except Exception:
-            lines.append(f"SNDS alert for {a['ip']}: complaints={a['complaint_rate']}% traps={a['trap_hits']} filter={a['filter_result']}")
+            lines.append(
+                f"SNDS alert for {a['ip']}: complaints={a['complaint_rate']}% traps={a['trap_hits']} filter={a['filter_result']}"
+            )
     msg = "\n".join(lines)
     if cfg["delivery"].get("email", {}).get("enabled"):
         _send_email(cfg["delivery"]["email"].get("recipients", ""), msg)
@@ -370,7 +437,6 @@ def run_snds():
     if cfg["delivery"].get("teams", {}).get("enabled"):
         _send_teams(cfg["delivery"]["teams"].get("webhook_url", ""), msg)
 
-    # Persist each alert line for dashboard visibility
     methods = []
     if cfg["delivery"].get("email", {}).get("enabled"):
         methods.append("email")
@@ -391,10 +457,26 @@ def run_snds():
         }
         plugin_store.add_alert("snds", line, methods_str, meta)
 
+    plugin_store.add_event(
+        "snds",
+        "run",
+        status="success",
+        message=f"Run completed; {len(alerts)} alerts triggered",
+        meta={"source": source, "alerts": len(alerts)},
+    )
+
 
 @register("senderscore")
 def run_senderscore():
     _ensure_senderscore_tables()
+    source = _RUN_CONTEXT.get()
+    plugin_store.add_event(
+        "senderscore",
+        "run",
+        status="started",
+        message=f"Run started ({source})",
+        meta={"source": source},
+    )
     cfg = plugin_store.load_plugin("senderscore", {
         "enabled": False,
         "schedule": {"enabled": False, "interval_minutes": 1440},
@@ -404,9 +486,16 @@ def run_senderscore():
     })
     if not cfg.get("enabled"):
         print("[worker] SenderScore disabled; skipping")
+        plugin_store.add_event(
+            "senderscore",
+            "run",
+            status="skipped",
+            message="Plugin disabled",
+            meta={"source": source},
+        )
         return
     # Build IP list
-    ips: list[str] = []
+    ips: list = []
     try:
         if cfg["options"].get("ip_source") == "snds":
             cur = sqlite3.connect(snds_db.DB_PATH).cursor()
@@ -418,9 +507,23 @@ def run_senderscore():
             ips = [p.strip() for p in parts if p.strip()]
     except Exception as e:
         print(f"[worker] SenderScore build IP list failed: {e}")
+        plugin_store.add_event(
+            "senderscore",
+            "run",
+            status="error",
+            message=f"IP list build failed: {e}",
+            meta={"source": source, "stage": "build-ips"},
+        )
         return
     if not ips:
         print("[worker] SenderScore no IPs to query")
+        plugin_store.add_event(
+            "senderscore",
+            "run",
+            status="skipped",
+            message="No IPs available for query",
+            meta={"source": source},
+        )
         return
     # Emulate human browsing cadence
     random.shuffle(ips)
@@ -541,6 +644,13 @@ def run_senderscore():
     conn.close()
     if not alerts:
         print("[worker] SenderScore: no alerts")
+        plugin_store.add_event(
+            "senderscore",
+            "run",
+            status="success",
+            message="Run completed; no alerts triggered",
+            meta={"source": source, "alerts": 0},
+        )
         return
     # Compose and deliver
     template = cfg["delivery"].get("message_template")
@@ -571,6 +681,14 @@ def run_senderscore():
     for idx, a in enumerate(alerts):
         line = lines[idx] if idx < len(lines) else str(a)
         plugin_store.add_alert("senderscore", line, methods_str, a)
+
+    plugin_store.add_event(
+        "senderscore",
+        "run",
+        status="success",
+        message=f"Run completed; {len(alerts)} alerts triggered",
+        meta={"source": source, "alerts": len(alerts)},
+    )
 
 
 def sync_jobs(scheduler: BlockingScheduler):
