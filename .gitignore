@@ -11,3 +11,4 @@ app.py
 .DS_Store
 plugins.db
 snds.db-journal
+plugins.db
