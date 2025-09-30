@@ -24,6 +24,7 @@ import random
 TZ = os.getenv("TZ", "UTC")
 
 _RUN_CONTEXT = ContextVar("plugin_run_context", default="worker")
+_SCHEDULER_REF: BlockingScheduler | None = None
 
 
 @contextmanager
@@ -33,6 +34,13 @@ def run_context(value: str):
         yield
     finally:
         _RUN_CONTEXT.reset(token)
+
+
+def _sync_jobs_job():
+    """Wrapper so APScheduler can serialize the callable."""
+    sched = _SCHEDULER_REF
+    if sched is not None:
+        sync_jobs(sched)
 
 
 def _send_email(to_addresses: str, body: str, subject: str = "SNDS Alerts"):
@@ -791,10 +799,12 @@ def main():
         print("[worker] using local SQLite job store")
 
     scheduler = BlockingScheduler(jobstores=jobstores, timezone=TZ)
+    global _SCHEDULER_REF
+    _SCHEDULER_REF = scheduler
 
     # Periodically refresh jobs from plugin configs
     scheduler.add_job(
-        lambda: sync_jobs(scheduler),
+        _sync_jobs_job,
         "interval",
         minutes=1,
         id="system:sync",
