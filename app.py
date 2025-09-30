@@ -18,13 +18,25 @@ import plugin_store
 from worker import run_senderscore
 
 
+def get_env(name, default=None):
+    value = os.getenv(name)
+    if value is not None:
+        return value
+    lowered = name.lower()
+    for key, val in os.environ.items():
+        if key.lower() == lowered:
+            return val
+    return default
+
+
 def create_app():
     app = Flask(__name__)
-    app.secret_key = os.getenv("APP_SECRET_KEY", "dev-secret-change-me")
+
+    app.secret_key = get_env("APP_SECRET_KEY", "dev-secret-change-me")
 
     # Simple in-memory user store for now; extend to DB later.
-    admin_user = os.getenv("APP_ADMIN_USER", "admin")
-    admin_pass = os.getenv("APP_ADMIN_PASS")
+    admin_user = get_env("APP_ADMIN_USER", "admin")
+    admin_pass = get_env("APP_ADMIN_PASS")
     if admin_pass:
         admin_hash = generate_password_hash(admin_pass)
     else:
@@ -32,17 +44,17 @@ def create_app():
         admin_hash = generate_password_hash("admin")
 
     # Background scheduler (disabled by default; worker handles scheduling)
-    SCHEDULER_MODE = os.getenv("APP_SCHEDULER_MODE", "worker").lower()
+    SCHEDULER_MODE = get_env("APP_SCHEDULER_MODE", "worker").lower()
     scheduler = None
     if SCHEDULER_MODE == "web":
-        scheduler = BackgroundScheduler(timezone=os.getenv("TZ", "UTC"))
+        scheduler = BackgroundScheduler(timezone=get_env("TZ", "UTC"))
         scheduler.start()
     # Plugin configuration persisted in plugins.db
     DEFAULT_SNDS_CONFIG = {
         "enabled": True,
         "schedule": {
             "enabled": False,
-            "interval_minutes": int(os.getenv("APP_DEFAULT_INTERVAL_MIN", "60")),
+            "interval_minutes": int(get_env("APP_DEFAULT_INTERVAL_MIN", "60")),
         },
         "alerts": {
             "enabled": True,
@@ -243,11 +255,11 @@ def create_app():
         if not emails:
             app.logger.warning("Email method enabled but no recipients configured")
             return
-        host = os.getenv("SMTP_HOST")
-        port = int(os.getenv("SMTP_PORT", "587"))
-        user = os.getenv("SMTP_USER")
-        pwd = os.getenv("SMTP_PASS")
-        sender = os.getenv("SMTP_FROM", user or "alerts@example.com")
+        host = get_env("SMTP_HOST")
+        port = int(get_env("SMTP_PORT", "587"))
+        user = get_env("SMTP_USER")
+        pwd = get_env("SMTP_PASS")
+        sender = get_env("SMTP_FROM", user or "alerts@example.com")
         if not host or not user or not pwd:
             app.logger.warning("SMTP not fully configured; skipping email send")
             return
@@ -386,7 +398,7 @@ def create_app():
         return render_template(
             "dashboard.html",
             schedule_job=schedule_state,
-            has_key=bool(os.getenv("SNDS_KEY")),
+            has_key=bool(get_env("SNDS_KEY")),
             snds_cfg=snds_cfg,
             news_cfg=news_cfg,
             ss_cfg=ss_cfg,
@@ -415,7 +427,7 @@ def create_app():
         ss_cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
         return render_template(
             "plugins.html",
-            has_key=bool(os.getenv("SNDS_KEY")),
+            has_key=bool(get_env("SNDS_KEY")),
             schedule_job=schedule_state,
             snds_cfg=snds_cfg,
             news_cfg=news_cfg,
@@ -729,4 +741,4 @@ def create_app():
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5000")))
+    app.run(host="0.0.0.0", port=int(get_env("PORT", "5000")))
