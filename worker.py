@@ -43,6 +43,20 @@ def _sync_jobs_job():
         sync_jobs(sched)
 
 
+def _record_last_run(plugin: str) -> None:
+    plugin_store.set_job_state(plugin, last_run=datetime.utcnow().isoformat())
+
+
+def _record_next_run(plugin: str, scheduler: BlockingScheduler | None, job_id: str) -> None:
+    if scheduler is None:
+        return
+    job = scheduler.get_job(job_id)
+    if job and job.next_run_time:
+        plugin_store.set_job_state(plugin, next_run=job.next_run_time.isoformat())
+    else:
+        plugin_store.set_job_state(plugin, next_run=None)
+
+
 def _send_email(to_addresses: str, body: str, subject: str = "SNDS Alerts"):
     emails = [e.strip() for e in (to_addresses or "").split(",") if e.strip()]
     if not emails:
@@ -333,6 +347,8 @@ def run_snds():
             message=f"Ingest failed: {e}",
             meta={"source": source, "stage": "ingest"},
         )
+        _record_last_run("snds")
+        _record_next_run("snds", _SCHEDULER_REF, "plugin:snds")
         return
 
     cfg = plugin_store.load_plugin("snds", {
@@ -355,6 +371,8 @@ def run_snds():
             message="Plugin disabled",
             meta={"source": source},
         )
+        _record_last_run("snds")
+        _record_next_run("snds", _SCHEDULER_REF, "plugin:snds")
         return
     if not cfg["alerts"].get("enabled"):
         print("[worker] SNDS alerts disabled; skipping evaluation")
@@ -365,6 +383,8 @@ def run_snds():
             message="Alerts disabled",
             meta={"source": source},
         )
+        _record_last_run("snds")
+        _record_next_run("snds", _SCHEDULER_REF, "plugin:snds")
         return
 
     alerts = []
@@ -389,6 +409,8 @@ def run_snds():
             message=f"Failed to load data_feed: {e}",
             meta={"source": source, "stage": "evaluate"},
         )
+        _record_last_run("snds")
+        _record_next_run("snds", _SCHEDULER_REF, "plugin:snds")
         return
 
     for r in rows:
@@ -426,6 +448,8 @@ def run_snds():
             message="Run completed; no alerts triggered",
             meta={"source": source, "alerts": 0},
         )
+        _record_last_run("snds")
+        _record_next_run("snds", _SCHEDULER_REF, "plugin:snds")
         return
 
     template = cfg["delivery"].get("message_template")
@@ -472,6 +496,8 @@ def run_snds():
         message=f"Run completed; {len(alerts)} alerts triggered",
         meta={"source": source, "alerts": len(alerts)},
     )
+    _record_last_run("snds")
+    _record_next_run("snds", _SCHEDULER_REF, "plugin:snds")
 
 
 @register("senderscore")
@@ -501,6 +527,8 @@ def run_senderscore():
             message="Plugin disabled",
             meta={"source": source},
         )
+        _record_last_run("senderscore")
+        _record_next_run("senderscore", _SCHEDULER_REF, "plugin:senderscore")
         return
     # Build IP list
     ips: list = []
@@ -522,6 +550,8 @@ def run_senderscore():
             message=f"IP list build failed: {e}",
             meta={"source": source, "stage": "build-ips"},
         )
+        _record_last_run("senderscore")
+        _record_next_run("senderscore", _SCHEDULER_REF, "plugin:senderscore")
         return
     if not ips:
         print("[worker] SenderScore no IPs to query")
@@ -532,6 +562,8 @@ def run_senderscore():
             message="No IPs available for query",
             meta={"source": source},
         )
+        _record_last_run("senderscore")
+        _record_next_run("senderscore", _SCHEDULER_REF, "plugin:senderscore")
         return
     # Emulate human browsing cadence
     random.shuffle(ips)
@@ -659,6 +691,8 @@ def run_senderscore():
             message="Run completed; no alerts triggered",
             meta={"source": source, "alerts": 0},
         )
+        _record_last_run("senderscore")
+        _record_next_run("senderscore", _SCHEDULER_REF, "plugin:senderscore")
         return
     # Compose and deliver
     template = cfg["delivery"].get("message_template")
@@ -697,6 +731,8 @@ def run_senderscore():
         message=f"Run completed; {len(alerts)} alerts triggered",
         meta={"source": source, "alerts": len(alerts)},
     )
+    _record_last_run("senderscore")
+    _record_next_run("senderscore", _SCHEDULER_REF, "plugin:senderscore")
 
 
 def sync_jobs(scheduler: BlockingScheduler):
@@ -714,6 +750,7 @@ def sync_jobs(scheduler: BlockingScheduler):
             if job:
                 scheduler.remove_job(job_id)
                 print("[worker] removed SNDS job (disabled)")
+            plugin_store.set_job_state("snds", next_run=None)
         else:
             minutes = max(1, int(cfg["schedule"].get("interval_minutes", 60)))
             scheduler.add_job(
@@ -727,6 +764,7 @@ def sync_jobs(scheduler: BlockingScheduler):
                 misfire_grace_time=300,
             )
             print(f"[worker] scheduled SNDS every {minutes}m")
+            _record_next_run("snds", scheduler, job_id)
     except Exception as e:
         print(f"[worker] failed to schedule SNDS: {e}")
 
@@ -742,6 +780,7 @@ def sync_jobs(scheduler: BlockingScheduler):
             if njob:
                 scheduler.remove_job(news_job_id)
                 print("[worker] removed News job (disabled)")
+            plugin_store.set_job_state("news", next_run=None)
         else:
             # Dummy lambda until real runner exists
             def _run_news():
@@ -759,6 +798,7 @@ def sync_jobs(scheduler: BlockingScheduler):
                 misfire_grace_time=300,
             )
             print(f"[worker] scheduled News every {minutes}m (placeholder)")
+            _record_next_run("news", scheduler, news_job_id)
     except Exception as e:
         print(f"[worker] failed to schedule News: {e}")
 
@@ -771,6 +811,7 @@ def sync_jobs(scheduler: BlockingScheduler):
             if job:
                 scheduler.remove_job(ss_job_id)
                 print("[worker] removed SenderScore job (disabled)")
+            plugin_store.set_job_state("senderscore", next_run=None)
         else:
             minutes = max(1, int(ss["schedule"].get("interval_minutes", 1440)))
             scheduler.add_job(
@@ -784,6 +825,7 @@ def sync_jobs(scheduler: BlockingScheduler):
                 misfire_grace_time=600,
             )
             print(f"[worker] scheduled SenderScore every {minutes}m")
+            _record_next_run("senderscore", scheduler, ss_job_id)
     except Exception as e:
         print(f"[worker] failed to schedule SenderScore: {e}")
 

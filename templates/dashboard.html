@@ -79,6 +79,7 @@
     
     <div class="card">
       <h3>Recent Alerts: SNDS</h3>
+      <p class="muted">Last run: {{ snds_job_state.get('last_run') or 'never' }} &nbsp;|&nbsp; Next run: {{ snds_job_state.get('next_run') or 'unscheduled' }}</p>
       {% if snds_alerts %}
         <table style="width:100%; border-collapse: collapse;">
           <thead>
@@ -115,6 +116,7 @@
 
     <div class="card">
       <h3>Recent Alerts: SenderScore</h3>
+      <p class="muted">Last run: {{ ss_job_state.get('last_run') or 'never' }} &nbsp;|&nbsp; Next run: {{ ss_job_state.get('next_run') or 'unscheduled' }}</p>
       {% if ss_alerts %}
         <table style="width:100%; border-collapse: collapse;">
           <thead>

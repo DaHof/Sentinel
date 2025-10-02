@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 PLUGINS_DB_PATH = os.getenv("PLUGINS_DB_PATH", "plugins.db")
 PLUGINS_DB_URL = os.getenv("PLUGINS_DB_URL") or os.getenv("DATABASE_URL")
 _ENGINE: Engine | None = create_engine(PLUGINS_DB_URL) if PLUGINS_DB_URL else None
+_UNSET = object()
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -71,6 +72,17 @@ def ensure_db():
                     """
                 )
             )
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS plugin_jobs (
+                        plugin TEXT PRIMARY KEY,
+                        next_run TEXT,
+                        last_run TEXT
+                    )
+                    """
+                )
+            )
             conn.commit()
     else:
         with _get_conn() as conn:
@@ -105,6 +117,15 @@ def ensure_db():
                     message TEXT,
                     created_at TEXT NOT NULL,
                     meta TEXT
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS plugin_jobs (
+                    plugin TEXT PRIMARY KEY,
+                    next_run TEXT,
+                    last_run TEXT
                 )
                 """
             )
@@ -424,3 +445,62 @@ def list_alerts_by_plugin(plugin: str, limit: int = 20) -> List[Dict[str, Any]]:
             }
         )
     return alerts
+
+
+def get_job_state(plugin: str) -> Dict[str, Any] | None:
+    """Return persisted scheduler state for a plugin (next/last run)."""
+    ensure_db()
+    if _ENGINE:
+        with _engine_conn() as conn:
+            row = conn.execute(
+                text("SELECT plugin, next_run, last_run FROM plugin_jobs WHERE plugin=:p"),
+                {"p": plugin},
+            ).fetchone()
+    else:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT plugin, next_run, last_run FROM plugin_jobs WHERE plugin=?",
+                (plugin,),
+            )
+            row = cur.fetchone()
+    if not row:
+        return None
+    return {"plugin": row[0], "next_run": row[1], "last_run": row[2]}
+
+
+def set_job_state(
+    plugin: str,
+    *,
+    next_run: Any = _UNSET,
+    last_run: Any = _UNSET,
+) -> Dict[str, Any]:
+    """Persist scheduler run metadata for a plugin."""
+    ensure_db()
+    current = get_job_state(plugin) or {"plugin": plugin, "next_run": None, "last_run": None}
+    if next_run is not _UNSET:
+        current["next_run"] = next_run
+    if last_run is not _UNSET:
+        current["last_run"] = last_run
+
+    if _ENGINE:
+        with _engine_conn() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO plugin_jobs (plugin, next_run, last_run) "
+                    "VALUES (:plugin, :next_run, :last_run) "
+                    "ON CONFLICT (plugin) DO UPDATE SET "
+                    "next_run = excluded.next_run, last_run = excluded.last_run"
+                ),
+                current,
+            )
+            conn.commit()
+    else:
+        with _get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT OR REPLACE INTO plugin_jobs (plugin, next_run, last_run) VALUES (?, ?, ?)",
+                (current["plugin"], current.get("next_run"), current.get("last_run")),
+            )
+            conn.commit()
+    return current

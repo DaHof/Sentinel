@@ -312,6 +312,7 @@ def create_app():
             message=f"Run triggered ({source})",
             meta={"source": source},
         )
+        run_timestamp = datetime.utcnow().isoformat()
         try:
             snds_db.main()
         except Exception as e:
@@ -323,6 +324,7 @@ def create_app():
                 message=f"Ingest failed: {e}",
                 meta={"source": source, "stage": "ingest"},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
             return False
 
         try:
@@ -336,6 +338,7 @@ def create_app():
                 message=f"Evaluation crashed: {e}",
                 meta={"source": source, "stage": "evaluate"},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
             return False
 
         alerts_count = len(alerts or [])
@@ -347,6 +350,7 @@ def create_app():
                 message="Plugin disabled during evaluation",
                 meta={"source": source},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
         elif eval_status == "alerts-disabled":
             plugin_store.add_event(
                 "snds",
@@ -355,6 +359,7 @@ def create_app():
                 message="Alerts disabled",
                 meta={"source": source},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
         elif eval_status == "no-alerts":
             plugin_store.add_event(
                 "snds",
@@ -363,6 +368,7 @@ def create_app():
                 message="Run completed; no alerts triggered",
                 meta={"source": source, "alerts": alerts_count},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
         elif eval_status == "alerts-triggered":
             plugin_store.add_event(
                 "snds",
@@ -371,6 +377,7 @@ def create_app():
                 message=f"Run completed; {alerts_count} alerts triggered",
                 meta={"source": source, "alerts": alerts_count},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
         elif eval_status == "error":
             plugin_store.add_event(
                 "snds",
@@ -379,6 +386,7 @@ def create_app():
                 message="Evaluation failed",
                 meta={"source": source},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
             return False
         else:
             plugin_store.add_event(
@@ -388,6 +396,7 @@ def create_app():
                 message=f"Run finished with status {eval_status}",
                 meta={"source": source, "alerts": alerts_count},
             )
+            plugin_store.set_job_state("snds", last_run=run_timestamp)
         return True
 
     # Ephemeral runtime state
@@ -433,6 +442,9 @@ def create_app():
         news_cfg = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
         ss_cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
         ui_cfg = plugin_store.load_plugin("ui", DEFAULT_UI_CONFIG)
+        snds_job_state = plugin_store.get_job_state("snds") or {}
+        ss_job_state = plugin_store.get_job_state("senderscore") or {}
+        news_job_state = plugin_store.get_job_state("news") or {}
         recent_alerts = plugin_store.list_alerts(limit=20)
         snds_alerts = plugin_store.list_alerts_by_plugin("snds", limit=10)
         ss_alerts = plugin_store.list_alerts_by_plugin("senderscore", limit=10)
@@ -474,6 +486,9 @@ def create_app():
             news_cfg=news_cfg,
             ss_cfg=ss_cfg,
             ui_cfg=ui_cfg,
+            snds_job_state=snds_job_state,
+            ss_job_state=ss_job_state,
+            news_job_state=news_job_state,
             ip_label_map=ip_label_map,
             recent_alerts=recent_alerts,
             snds_alerts=snds_alerts,
@@ -502,6 +517,9 @@ def create_app():
         snds_cfg = plugin_store.load_plugin("snds", DEFAULT_SNDS_CONFIG)
         news_cfg = plugin_store.load_plugin("news", DEFAULT_NEWS_CONFIG)
         ss_cfg = plugin_store.load_plugin("senderscore", DEFAULT_SS_CONFIG)
+        snds_job_state = plugin_store.get_job_state("snds") or {}
+        ss_job_state = plugin_store.get_job_state("senderscore") or {}
+        news_job_state = plugin_store.get_job_state("news") or {}
         return render_template(
             "plugins.html",
             has_key=bool(os.getenv("SNDS_KEY")),
@@ -509,6 +527,9 @@ def create_app():
             snds_cfg=snds_cfg,
             news_cfg=news_cfg,
             ss_cfg=ss_cfg,
+            snds_job_state=snds_job_state,
+            ss_job_state=ss_job_state,
+            news_job_state=news_job_state,
         )
 
     @app.route("/plugins/snds/schedule", methods=["POST"])
@@ -671,6 +692,7 @@ def create_app():
                 message=f"Manual run crashed: {e}",
                 meta={"source": "manual"},
             )
+            plugin_store.set_job_state("senderscore", last_run=datetime.utcnow().isoformat())
             flash("SenderScore run failed; check logs", "error")
         return redirect(url_for("dashboard"))
 

@@ -95,7 +95,10 @@
               <input type="checkbox" name="enabled" {% if snds_cfg.schedule.enabled %}checked{% endif %} />
               Enabled
             </label>
-            <div class="muted">Last run: {{ schedule_job.last_run_at or 'never' }}</div>
+            <div class="muted">
+              Last run: {{ snds_job_state.get('last_run') or 'never' }}<br/>
+              Next run: {{ snds_job_state.get('next_run') or 'unscheduled' }}
+            </div>
             <button type="submit">Save Schedule</button>
           </form>
           <form method="post" action="/run-now">
@@ -171,6 +174,10 @@
               <input type="checkbox" name="enabled" {% if news_cfg.schedule.enabled %}checked{% endif %} />
               Enabled
             </label>
+            <div class="muted">
+              Last run: {{ news_job_state.get('last_run') or 'never' }}<br/>
+              Next run: {{ news_job_state.get('next_run') or 'unscheduled' }}
+            </div>
             <div class="muted">Note: News plugin is a placeholder. No job runs yet.</div>
             <button type="submit">Save Schedule</button>
           </form>
@@ -236,6 +243,10 @@
               <input type="checkbox" name="enabled" {% if ss_cfg.schedule.enabled %}checked{% endif %} />
               Enabled
             </label>
+            <div class="muted">
+              Last run: {{ ss_job_state.get('last_run') or 'never' }}<br/>
+              Next run: {{ ss_job_state.get('next_run') or 'unscheduled' }}
+            </div>
             <button type="submit">Save Schedule</button>
           </form>
           <form method="post" action="/plugins/senderscore/run-now">
